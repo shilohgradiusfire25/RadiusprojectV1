@@ -2,59 +2,66 @@ export type CallState =
   | 'idle'
   | 'incoming_ringing'
   | 'outgoing_dialing'
-  | 'answered'
   | 'connected'
-  | 'on_hold'
+  | 'held'
   | 'ended'
   | 'missed'
-  | 'failed';
+  | 'failed'
+  | 'unknown';
 
-export type CallDirection = 'inbound' | 'outbound';
+export type CallDirection = 'inbound' | 'outbound' | 'internal' | 'unknown';
+export type OutboundBehavior = 'off' | 'ask' | 'auto_start';
+export type NoteStatus = 'draft' | 'pending_review' | 'reviewed' | 'exported' | 'deleted';
 
-export interface Participant {
-  name: string;
-  phone: string;
-  role: 'employee' | 'customer' | 'unknown';
-}
-
-export interface TranscriptLine {
-  speaker: string;
-  startTime: number;
-  endTime: number;
-  text: string;
-}
-
-export interface StructuredNote {
-  callId: string;
-  direction: CallDirection;
-  startedAt: string;
-  endedAt: string;
-  durationSeconds: number;
-  participants: Participant[];
-  transcript: TranscriptLine[];
-  notes: {
-    summary: string;
-    keyPoints: string[];
-    customerIntent: string;
-    questionsAsked: string[];
-    answersGiven: string[];
-    actionItems: { task: string; owner: string; dueDate: string | null }[];
-    followUp: { required: boolean; owner: string | null; deadline: string | null; recommendedMessage: string | null };
-    sentiment: 'positive' | 'neutral' | 'negative' | 'mixed' | 'unknown';
-    urgency: 'low' | 'medium' | 'high' | 'unknown';
-    outcome: string;
-    risks: string[];
-    recommendedNextStep: string;
-  };
-  status: 'draft' | 'reviewed' | 'exported' | 'deleted';
-  source: { provider: string; callingApp: string };
-}
-
-export interface CallSession {
+export interface CallMetadata {
   callId: string;
   direction: CallDirection;
   state: CallState;
-  startedAt: Date;
-  endedAt?: Date;
-  caller?: Participant;
+  remoteName: string | null;
+  remoteNumber: string | null;
+  employeeExtension: string | null;
+  employeeUserId: string | null;
+  startedAt: string | null;
+  connectedAt: string | null;
+  endedAt: string | null;
+  source: 'zultys-zac' | 'manual' | 'mock';
+  rawProviderPayload: Record<string, unknown> | null;
+}
+
+export interface TranscriptSegment {
+  id: string;
+  callId: string;
+  speaker: 'employee' | 'customer' | 'unknown';
+  startTimeMs: number;
+  endTimeMs: number;
+  text: string;
+  isFinal: boolean;
+  confidence: number;
+  source: 'live' | 'batch' | 'imported';
+}
+
+export interface StructuredNote {
+  noteId: string;
+  callId: string;
+  status: NoteStatus;
+  direction: CallDirection;
+  startedAt: string;
+  connectedAt: string | null;
+  endedAt: string;
+  durationSeconds: number;
+  participants: Array<{ name: string | null; phone: string | null; role: 'employee' | 'customer' | 'unknown' }>;
+  transcript: Array<{ speaker: 'employee' | 'customer' | 'unknown'; startTimeMs: number; endTimeMs: number; text: string }>;
+  notes: Record<string, unknown>;
+  review: { required: true; reviewedBy: string | null; reviewedAt: string | null; employeeEdits: boolean };
+  crm: { exportStatus: 'not_exported' | 'exported' | 'failed'; crmProvider: string | null; crmObjectType: string; crmObjectId: string | null; lastExportedAt: string | null };
+  source: { callingApp: 'Zultys ZAC'; callProvider: string; transcriptionProvider: string; noteProvider: string };
+}
+
+export interface AdminPolicy {
+  autoInboundNotesEnabled: boolean;
+  outboundAutoNotesEnabled: boolean;
+  outboundBehavior: OutboundBehavior;
+  requireReviewBeforeExport: boolean;
+  allowManualTranscription: boolean;
+  allowTranscriptExport: boolean;
 }
