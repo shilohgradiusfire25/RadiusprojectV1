@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { CaptureMode } from '../services/audio/AudioCaptureProvider';
 import { Link, Route, Routes } from 'react-router-dom';
 import { STATIC_DEMO_BANNER } from '../services/app-mode/AppMode';
 import { providerRegistry } from '../services/app-mode/providerRegistry';
@@ -35,6 +36,12 @@ export default function App() {
   const [noteDraft, setNoteDraft] = useState('');
   const [selectedNoteId, setSelectedNoteId] = useState('');
   const [manualSession, setManualSession] = useState(false);
+  const [realCaptureMode, setRealCaptureMode] = useState<CaptureMode>('microphone-only');
+  const [audioInputId, setAudioInputId] = useState('');
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [isRealCallRunning, setIsRealCallRunning] = useState(false);
+  const [realGeneratedNotes, setRealGeneratedNotes] = useState('');
+  const [realReviewed, setRealReviewed] = useState(false);
   const [outboundMode, setOutboundMode] = useState<OutboundMode>(() => storage.get('outbound-mode', 'ask'));
 
   const addAudit = (action: string, detail: string) => {
@@ -130,6 +137,38 @@ export default function App() {
     addAudit('crm.exported', `${id} -> ${result.crmId}`);
   };
 
+
+  const loadAudioInputs = async () => {
+    const devices = await providerRegistry.audio.getInputDevices();
+    setAudioInputs(devices);
+    if (!audioInputId && devices[0]?.deviceId) setAudioInputId(devices[0].deviceId);
+  };
+
+  const startRealCallNotes = async () => {
+    setLive([]);
+    setRealGeneratedNotes('');
+    setRealReviewed(false);
+    const callId = `real-call-${Date.now()}`;
+    setCurrentCallId(callId);
+    await providerRegistry.transcription.startRealtimeSession(callId, (line) => setLive(prev => [...prev, line]));
+    await providerRegistry.audio.start({ mode: realCaptureMode, deviceId: audioInputId || undefined, onChunk: async (chunk) => {
+      await providerRegistry.transcription.pushAudioChunk(chunk);
+      setLive(prev => [...prev, `[${new Date().toISOString()}] Audio chunk sent`]);
+    } });
+    setIsRealCallRunning(true);
+    addAudit('realcall.started', `${callId} (${realCaptureMode})`);
+  };
+
+  const stopRealCallNotes = async () => {
+    await providerRegistry.audio.stop();
+    const lines = await providerRegistry.transcription.stopRealtimeSession();
+    setLive(lines);
+    const generated = await providerRegistry.notes.generate(lines);
+    setRealGeneratedNotes(generated);
+    setIsRealCallRunning(false);
+    addAudit('realcall.stopped', currentCallId);
+  };
+
   const updateOutboundMode = (mode: OutboundMode) => {
     setOutboundMode(mode);
     storage.set('outbound-mode', mode);
@@ -141,7 +180,7 @@ export default function App() {
       <div style={{ background: '#ffefc2', padding: 12, marginBottom: 12, border: '1px solid #d2aa35' }}>{STATIC_DEMO_BANNER}</div>
 
       <nav style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        {['/', '/live', '/review', '/history', '/settings', '/admin'].map(p => (
+        {['/', '/live', '/real-call-test', '/review', '/history', '/settings', '/admin'].map(p => (
           <Link key={p} to={p}>{p === '/' ? 'Dashboard' : p.slice(1)}</Link>
         ))}
       </nav>
@@ -164,6 +203,40 @@ export default function App() {
           <h2>Live Call</h2>
           <p>Auto-start mock live transcription begins when inbound is answered.</p>
           <pre style={{ background: '#f6f8fa', padding: 12, border: '1px solid #ddd' }}>{live.length ? live.join('\n') : 'No active mock transcription yet.'}</pre>
+        </div>} />
+
+
+        <Route path='/real-call-test' element={<div>
+          <h2>Real Call Test</h2>
+          <p style={{ background: '#fff4e5', border: '1px solid #d9a441', padding: 10 }}>Real Call Mode may record or transcribe call audio. Use only with proper consent and company authorization.</p>
+          <button onClick={loadAudioInputs}>Refresh audio inputs</button>
+          <div style={{ marginTop: 8 }}>
+            <label>Audio input selector: </label>
+            <select value={audioInputId} onChange={e => setAudioInputId(e.target.value)}>
+              <option value=''>Default</option>
+              {audioInputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
+            </select>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <label>Capture mode selector: </label>
+            <select value={realCaptureMode} onChange={e => setRealCaptureMode(e.target.value as CaptureMode)}>
+              <option value='microphone-only'>microphone only</option>
+              <option value='system-audio'>system audio</option>
+              <option value='dual-capture'>dual capture</option>
+            </select>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <button onClick={startRealCallNotes} disabled={isRealCallRunning}>Start real call notes</button>{' '}
+            <button onClick={stopRealCallNotes} disabled={!isRealCallRunning}>Stop real call notes</button>
+          </div>
+          <h3>Live transcript panel</h3>
+          <pre style={{ background: '#f6f8fa', padding: 12, border: '1px solid #ddd', minHeight: 120 }}>{live.join('\n') || 'No transcript yet.'}</pre>
+          <h3>Generated notes panel</h3>
+          <textarea rows={10} style={{ width: '100%' }} value={realGeneratedNotes} onChange={e => setRealGeneratedNotes(e.target.value)} />
+          <div style={{ marginTop: 8 }}>
+            <button onClick={() => setRealReviewed(true)}>Review</button>{' '}
+            <button disabled={!realReviewed}>Export</button>
+          </div>
         </div>} />
 
         <Route path='/review' element={<div>
