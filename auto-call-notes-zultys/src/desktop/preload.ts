@@ -1,0 +1,1 @@
+// Desktop preload bridge (stub).
